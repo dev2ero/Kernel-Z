@@ -1,64 +1,68 @@
 #include "asm.h"
 #include "mmu.h"
 
-.code 16
-.global start
+.code16                       # Assemble for 16-bit mode
+.globl start
 start:
-	cli										# clear interrupt flag
+  cli                         # BIOS enabled interrupts; disable
 
-	# zero segment registers
-	xor	ax, ax
-	mov	ds, ax
-	mov	es, ax
-	mov	ss, ax
+  xorw    %ax,%ax             # Set %ax to zero
+  movw    %ax,%ds             # -> Data Segment
+  movw    %ax,%es             # -> Extra Segment
+  movw    %ax,%ss             # -> Stack Segment
 
-	# handle A20
+  # handle A20
 seta20.1:
-	in	al, 0x64
-	test	al, 0x2
-	jnz	seta20.1
-	mov	al, 0xd1
-	out	0x64, al
+  inb     $0x64,%al
+  testb   $0x2,%al
+  jnz     seta20.1
 
-seta20.2
-	in	al, 0x64
-	test	al, 0x2
-	jnz	seta20.2
-	mov	al, 0xdf
-	out	0x60, al
+  movb    $0xd1,%al
+  outb    %al,$0x64
 
-	# swith from real mode to protected mode
-	lgdt	gdtdesc
-	mov	eax, cr0
-	or	eax, CR0_PE
-	mov	cr0, eax
+seta20.2:
+  inb     $0x64,%al
+  testb   $0x2,%al
+  jnz     seta20.2
 
-	# complete the transition to 32-its protected mode
-	ljmp	start32, SEG_KCODE<<3
+  movb    $0xdf,%al
+  outb    %al,$0x60
 
-.code32										# tell assembler generate 32-bit code from now on
+  # switch from real to protected mode
+  lgdt    gdtdesc
+  movl    %cr0, %eax
+  orl     $CR0_PE, %eax
+  movl    %eax, %cr0
+
+  # complete the transition to 32-bit protected mode
+  ljmp    $(SEG_KCODE<<3), $start32
+
+.code32  # tell assembler to generate 32-bit code now.
 start32:
-	# set up registers and call into C
-	mov	ax, SEG_KDATA<<3
-	mov	ds, ax
-	mov	es, ax
-	mov	ss, ax
-	mov 	ax, 0
-	mov	fs, ax
-	mov	gs, ax
-	mov	esp, start
-	call	bootmain
+  # set up the protected-mode data segment registers
+  movw    $(SEG_KDATA<<3), %ax    # Our data segment selector
+  movw    %ax, %ds                # -> DS: Data Segment
+  movw    %ax, %es                # -> ES: Extra Segment
+  movw    %ax, %ss                # -> SS: Stack Segment
+  movw    $0, %ax                 # Zero segments not ready for use
+  movw    %ax, %fs                # -> FS
+  movw    %ax, %gs                # -> GS
+
+  # set up the stack pointer and call into C.
+  movl    $start, %esp
+  call    bootmain
 
 spin:
-	jmp	spin
+  jmp     spin
 
 # bootstrap GDT
-.p2align 2
+.p2align 2                                # force 4 byte alignment
 gdt:
-	SEG_NULLASM								# null segment
-	SEG_ASM(STA_X|STA_R, 0x, 0xffffffff)	# code segment
-	SEG_ASM(STA_W, 0x0, 0xffffffff)			# data segment
+  SEG_NULLASM                             # null seg
+  SEG_ASM(STA_X|STA_R, 0x0, 0xffffffff)   # code seg
+  SEG_ASM(STA_W, 0x0, 0xffffffff)         # data seg
 
 gdtdesc:
-	.word	(gdtdesc - gdt - 1)
-	.long	gdt
+  .word   (gdtdesc - gdt - 1)             # sizeof(gdt) - 1
+  .long   gdt                             # address gdt
+

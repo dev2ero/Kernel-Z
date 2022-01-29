@@ -1,2 +1,2 @@
 # Kernel-Z
-A crafting kernel
+An ignorable kernel
